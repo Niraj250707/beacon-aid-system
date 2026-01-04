@@ -169,7 +169,7 @@ const Transactions: React.FC = () => {
           {/* Transaction History */}
           <TransactionList 
             transactions={merchantTransactions}
-            title="Incoming Payments"
+            userAddress={wallet.address || undefined}
           />
         </div>
       </main>

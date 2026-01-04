@@ -199,7 +199,9 @@ const DonorDashboard: React.FC = () => {
                 Vote on program changes using your DAO tokens
               </p>
             </div>
-            <Button variant="outline">Create Proposal</Button>
+            <Button variant="outline" asChild>
+              <a href="/dao">View All & Create</a>
+            </Button>
           </div>
 
           <div className="space-y-4">

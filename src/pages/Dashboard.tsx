@@ -6,9 +6,15 @@ import MerchantDashboard from '@/components/dashboards/MerchantDashboard';
 import DonorDashboard from '@/components/dashboards/DonorDashboard';
 import FieldAgentDashboard from '@/components/dashboards/FieldAgentDashboard';
 import { useWallet } from '@/contexts/WalletContext';
+import { useRealtimeNotifications } from '@/hooks/useRealtimeNotifications';
 
 const Dashboard: React.FC = () => {
-  const { userRole } = useWallet();
+  const { userRole, wallet } = useWallet();
+
+  // Enable real-time notifications for the current user
+  useRealtimeNotifications({ 
+    userAddress: wallet.address || undefined 
+  });
 
   const renderDashboard = () => {
     switch (userRole) {

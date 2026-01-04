@@ -171,8 +171,7 @@ const Pay: React.FC = () => {
             {/* Payment Form / QR Scanner */}
             {showPayment ? (
               <QRPayment 
-                maxAmount={Math.min(remainingBalance, remainingDaily)}
-                onComplete={() => setShowPayment(false)}
+                onPaymentComplete={() => setShowPayment(false)}
               />
             ) : (
               <Card className="flex items-center justify-center">
@@ -193,7 +192,7 @@ const Pay: React.FC = () => {
           {/* Recent Transactions */}
           <TransactionList 
             transactions={mockTransactions.filter(t => t.type === 'PAYMENT')}
-            title="Recent Payments"
+            userAddress={wallet.address || undefined}
           />
         </div>
       </main>
