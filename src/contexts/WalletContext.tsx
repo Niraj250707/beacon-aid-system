@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { WalletState, UserRole } from '@/types';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 interface WalletContextType {
   wallet: WalletState;
@@ -9,6 +10,7 @@ interface WalletContextType {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   switchNetwork: () => Promise<void>;
+  isCreatingProfile: boolean;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -26,6 +28,76 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   });
 
   const [userRole, setUserRole] = useState<UserRole>('BENEFICIARY');
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false);
+
+  // Create or update profile in database
+  const syncWalletToDatabase = useCallback(async (walletAddress: string) => {
+    try {
+      setIsCreatingProfile(true);
+      
+      // Check if profile exists with this wallet
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('wallet_address', walletAddress)
+        .maybeSingle();
+
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Error fetching profile:', fetchError);
+        return;
+      }
+
+      if (existingProfile) {
+        // Fetch user role from user_roles table
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', existingProfile.user_id)
+          .maybeSingle();
+
+        if (roleData?.role) {
+          const roleMap: Record<string, UserRole> = {
+            admin: 'ADMIN',
+            donor: 'DONOR',
+            beneficiary: 'BENEFICIARY',
+            merchant: 'MERCHANT',
+            field_agent: 'FIELD_AGENT',
+          };
+          setUserRole(roleMap[roleData.role] || 'BENEFICIARY');
+        }
+        toast.success('Welcome back!', {
+          description: `Connected as ${existingProfile.name || walletAddress.slice(0, 8)}`,
+        });
+      } else {
+        // New wallet - check if user is authenticated
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          // Update existing profile with wallet address
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ wallet_address: walletAddress })
+            .eq('user_id', user.id);
+
+          if (updateError) {
+            console.error('Error updating profile:', updateError);
+          } else {
+            toast.success('Wallet linked to account', {
+              description: 'Your wallet has been connected to your profile',
+            });
+          }
+        } else {
+          toast.info('New wallet detected', {
+            description: 'Sign in to create a profile and access all features',
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing wallet:', error);
+    } finally {
+      setIsCreatingProfile(false);
+    }
+  }, []);
 
   // Check for existing connection on mount
   useEffect(() => {
@@ -39,13 +111,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const chainId = await (window as any).ethereum.request({ 
               method: 'eth_chainId' 
             });
+            const address = accounts[0];
             setWallet({
               connected: true,
-              address: accounts[0],
+              address,
               balance: 25000, // Mock balance in relief tokens
               chainId: parseInt(chainId, 16),
               isCorrectNetwork: parseInt(chainId, 16) === REQUIRED_CHAIN_ID,
             });
+            
+            // Sync with database
+            await syncWalletToDatabase(address);
           }
         } catch (error) {
           console.error('Error checking existing connection:', error);
@@ -54,12 +130,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     checkExistingConnection();
-  }, []);
+  }, [syncWalletToDatabase]);
 
   // Listen for account and chain changes
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
-      const handleAccountsChanged = (accounts: string[]) => {
+      const handleAccountsChanged = async (accounts: string[]) => {
         if (accounts.length === 0) {
           disconnectWallet();
         } else {
@@ -67,6 +143,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             ...prev,
             address: accounts[0],
           }));
+          // Sync new account with database
+          await syncWalletToDatabase(accounts[0]);
         }
       };
 
@@ -87,7 +165,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         (window as any).ethereum.removeListener('chainChanged', handleChainChanged);
       };
     }
-  }, []);
+  }, [syncWalletToDatabase]);
 
   const connectWallet = useCallback(async () => {
     if (typeof window === 'undefined' || !(window as any).ethereum) {
@@ -107,18 +185,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
 
       const numericChainId = parseInt(chainId, 16);
+      const address = accounts[0];
 
       setWallet({
         connected: true,
-        address: accounts[0],
+        address,
         balance: 25000, // Mock balance
         chainId: numericChainId,
         isCorrectNetwork: numericChainId === REQUIRED_CHAIN_ID,
       });
 
       toast.success('Wallet connected', {
-        description: `Connected to ${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`,
+        description: `Connected to ${address.slice(0, 6)}...${address.slice(-4)}`,
       });
+
+      // Sync with database
+      await syncWalletToDatabase(address);
 
       if (numericChainId !== REQUIRED_CHAIN_ID) {
         toast.warning('Wrong network', {
@@ -131,7 +213,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: error.message || 'Failed to connect wallet',
       });
     }
-  }, []);
+  }, [syncWalletToDatabase]);
 
   const disconnectWallet = useCallback(() => {
     setWallet({
@@ -141,6 +223,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       chainId: null,
       isCorrectNetwork: false,
     });
+    setUserRole('BENEFICIARY');
     toast.info('Wallet disconnected');
   }, []);
 
@@ -191,7 +274,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setUserRole, 
         connectWallet, 
         disconnectWallet, 
-        switchNetwork 
+        switchNetwork,
+        isCreatingProfile,
       }}
     >
       {children}
